@@ -12,12 +12,16 @@
     <!-- Tailwind CSS for rapid styling -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- PyScript Configuration for Pillow (Image Processing) -->
-    <py-config>
+    <!-- PyScript Configuration (Hidden to prevent text leak) -->
+    <py-config style="display: none;">
         packages = ["Pillow"]
     </py-config>
 
     <style>
+        /* Hide py-script tags before PyScript fully loads */
+        py-script {
+            display: none;
+        }
         .camera-container {
             position: relative;
             width: 100%;
@@ -40,7 +44,7 @@
             transform: translate(-50%, -50%);
             width: 100px;
             height: 100px;
-            border: 3px solid #10B981; /* Tailwind Emerald 500 */
+            border: 3px solid #10B981;
             box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
             pointer-events: none;
         }
@@ -50,18 +54,24 @@
 
     <div class="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6 text-center">
         <h1 class="text-2xl font-bold text-emerald-600 mb-2">CORTISYNC</h1>
-        <p class="text-sm text-gray-500 mb-6">Align the saliva strip within the green box.</p>
+        <p class="text-sm text-gray-500 mb-6">Align the saliva strip within the green box, or upload a photo.</p>
 
-        <!-- MEASURE Phase: Camera UI -->
+        <!-- MEASURE Phase: Camera & Upload UI -->
         <div id="ui-measure">
             <div class="camera-container mb-4">
                 <video id="camera-stream" autoplay playsinline></video>
                 <div class="targeting-box"></div>
             </div>
             
-            <button id="capture-btn" class="bg-emerald-500 text-white font-bold py-2 px-6 rounded-full hover:bg-emerald-600 w-full transition">
-                Capture & Analyze
+            <button id="capture-btn" class="bg-emerald-500 text-white font-bold py-2 px-6 rounded-full hover:bg-emerald-600 w-full transition mb-3">
+                Capture via Camera
             </button>
+            
+            <button id="upload-btn" class="bg-gray-200 text-gray-700 font-bold py-2 px-6 rounded-full hover:bg-gray-300 w-full transition">
+                Upload from Gallery
+            </button>
+            <!-- Hidden file input for gallery upload -->
+            <input type="file" id="file-upload" accept="image/*" class="hidden">
         </div>
 
         <!-- Hidden elements for JS to Python data transfer -->
@@ -84,16 +94,18 @@
         </div>
     </div>
 
-    <!-- JavaScript: Camera & Capture Logic -->
+    <!-- JavaScript: Camera & Upload Logic -->
     <script>
         const video = document.getElementById('camera-stream');
         const canvas = document.getElementById('capture-canvas');
         const captureBtn = document.getElementById('capture-btn');
+        const uploadBtn = document.getElementById('upload-btn');
+        const fileUpload = document.getElementById('file-upload');
         const dataInput = document.getElementById('base64-image-data');
         const pythonBtn = document.getElementById('trigger-python-btn');
         const context = canvas.getContext('2d');
 
-        // Request rear camera access
+        // 1. Request rear camera access
         navigator.mediaDevices.getUserMedia({ 
             video: { facingMode: "environment" } 
         })
@@ -101,29 +113,58 @@
             video.srcObject = stream;
         })
         .catch(err => {
-            alert("Please allow camera access to use Cortisync.");
-            console.error("Camera access denied", err);
+            console.warn("Camera access denied or unavailable. Please use the upload option.", err);
         });
 
-        // Capture frame and pass to Python
+        // 2. Capture frame from live camera
         captureBtn.addEventListener('click', () => {
+            if (!video.srcObject) {
+                alert("Camera not active. Please use the Upload from Gallery option.");
+                return;
+            }
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // Extract base64 and remove the prefix
+            triggerPythonAnalysis();
+        });
+
+        // 3. Trigger File Upload Dialog
+        uploadBtn.addEventListener('click', () => {
+            fileUpload.click();
+        });
+
+        // 4. Handle Uploaded Image
+        fileUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    triggerPythonAnalysis();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // 5. Shared function to extract Base64 and run Python
+        function triggerPythonAnalysis() {
             const imageDataUrl = canvas.toDataURL('image/jpeg');
-            const base64Data = imageDataUrl.split(',')[1]; 
+            const base64Data = imageDataUrl.split(',')[1]; // Remove header
             
-            // Pass data to hidden input and trigger PyScript
             dataInput.value = base64Data;
             document.getElementById('ui-measure').classList.add('hidden');
             pythonBtn.click(); 
-        });
+        }
     </script>
 
     <!-- Python: AI Color Extraction & Logic -->
-    <py-script>
+    <py-script style="display: none;">
         import base64
         import io
         import colorsys
@@ -131,20 +172,20 @@
         from pyscript import document
 
         def process_strip(event):
-            # 1. Retrieve the base64 image string from the hidden DOM input
+            # Retrieve the base64 image string from the hidden DOM input
             base64_string = document.getElementById('base64-image-data').value
             image_data = base64.b64decode(base64_string)
             
-            # 2. Load image into Pillow
+            # Load image into Pillow
             img = Image.open(io.BytesIO(image_data)).convert('RGB')
             
-            # 3. Crop to the central 20% (matching the CSS targeting box)
+            # Crop to the central 20% (simulating the targeting box area)
             width, height = img.size
             left, top = width * 0.4, height * 0.4
             right, bottom = width * 0.6, height * 0.6
             cropped_img = img.crop((left, top, right, bottom))
             
-            # 4. Extract Average Color (HSV)
+            # Extract Average Color (HSV)
             pixels = list(cropped_img.getdata())
             avg_r = sum(p[0] for p in pixels) / len(pixels)
             avg_g = sum(p[1] for p in pixels) / len(pixels)
@@ -153,7 +194,7 @@
             h, s, v = colorsys.rgb_to_hsv(avg_r / 255.0, avg_g / 255.0, avg_b / 255.0)
             hue_degrees = h * 360
             
-            # 5. UNDERSTAND Phase: Categorize Stress Level
+            # UNDERSTAND Phase: Categorize Stress Level
             if 45 <= hue_degrees <= 90:
                 status = "Low Stress"
                 bg_color = "bg-green-100 text-green-800"
@@ -164,7 +205,7 @@
                 status = "High Stress"
                 bg_color = "bg-red-100 text-red-800"
                 
-            # 6. RESPOND Phase: Actionable Steps
+            # RESPOND Phase: Actionable Steps
             if status == "Low Stress":
                 action = "You are well balanced. Maintain your current routine and hydration levels."
             elif status == "Moderate Stress":
@@ -172,7 +213,7 @@
             else:
                 action = "Elevated cortisol detected. Initiate a 4-7-8 deep breathing protocol immediately."
 
-            # 7. Update UI
+            # Update UI
             document.getElementById('ui-results').classList.remove('hidden')
             
             status_div = document.getElementById('result-status')
