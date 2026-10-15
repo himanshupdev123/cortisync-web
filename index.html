@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORTISYNC - Stress Tracker</title>
+    
+    <!-- PyScript Requirements -->
+    <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
+    <script defer src="https://pyscript.net/latest/pyscript.js"></script>
+    
+    <!-- Tailwind CSS for rapid styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- PyScript Configuration for Pillow (Image Processing) -->
+    <py-config>
+        packages = ["Pillow"]
+    </py-config>
+
+    <style>
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            height: 300px;
+            background: #000;
+            overflow: hidden;
+            margin: 0 auto;
+            border-radius: 0.5rem;
+        }
+        #camera-stream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .targeting-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100px;
+            height: 100px;
+            border: 3px solid #10B981; /* Tailwind Emerald 500 */
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans p-4">
+
+    <div class="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6 text-center">
+        <h1 class="text-2xl font-bold text-emerald-600 mb-2">CORTISYNC</h1>
+        <p class="text-sm text-gray-500 mb-6">Align the saliva strip within the green box.</p>
+
+        <!-- MEASURE Phase: Camera UI -->
+        <div id="ui-measure">
+            <div class="camera-container mb-4">
+                <video id="camera-stream" autoplay playsinline></video>
+                <div class="targeting-box"></div>
+            </div>
+            
+            <button id="capture-btn" class="bg-emerald-500 text-white font-bold py-2 px-6 rounded-full hover:bg-emerald-600 w-full transition">
+                Capture & Analyze
+            </button>
+        </div>
+
+        <!-- Hidden elements for JS to Python data transfer -->
+        <canvas id="capture-canvas" style="display: none;"></canvas>
+        <input type="hidden" id="base64-image-data">
+        <button id="trigger-python-btn" py-click="process_strip" style="display: none;"></button>
+
+        <!-- UNDERSTAND & RESPOND Phase: Results UI -->
+        <div id="ui-results" class="hidden mt-6">
+            <h2 class="text-xl font-bold mb-2">Analysis Complete</h2>
+            <div id="result-status" class="text-lg font-semibold py-2 px-4 rounded-md mb-2"></div>
+            <p class="text-sm text-gray-600 mb-4" id="result-details"></p>
+            
+            <div class="bg-gray-100 p-4 rounded-md text-left">
+                <h3 class="font-bold text-sm text-gray-500 uppercase tracking-wider mb-1">Action Plan</h3>
+                <p id="result-action" class="text-gray-800"></p>
+            </div>
+            
+            <button onclick="location.reload()" class="mt-6 text-emerald-600 underline text-sm">Scan another strip</button>
+        </div>
+    </div>
+
+    <!-- JavaScript: Camera & Capture Logic -->
+    <script>
+        const video = document.getElementById('camera-stream');
+        const canvas = document.getElementById('capture-canvas');
+        const captureBtn = document.getElementById('capture-btn');
+        const dataInput = document.getElementById('base64-image-data');
+        const pythonBtn = document.getElementById('trigger-python-btn');
+        const context = canvas.getContext('2d');
+
+        // Request rear camera access
+        navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment" } 
+        })
+        .then(stream => {
+            video.srcObject = stream;
+        })
+        .catch(err => {
+            alert("Please allow camera access to use Cortisync.");
+            console.error("Camera access denied", err);
+        });
+
+        // Capture frame and pass to Python
+        captureBtn.addEventListener('click', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Extract base64 and remove the prefix
+            const imageDataUrl = canvas.toDataURL('image/jpeg');
+            const base64Data = imageDataUrl.split(',')[1]; 
+            
+            // Pass data to hidden input and trigger PyScript
+            dataInput.value = base64Data;
+            document.getElementById('ui-measure').classList.add('hidden');
+            pythonBtn.click(); 
+        });
+    </script>
+
+    <!-- Python: AI Color Extraction & Logic -->
+    <py-script>
+        import base64
+        import io
+        import colorsys
+        from PIL import Image
+        from pyscript import document
+
+        def process_strip(event):
+            # 1. Retrieve the base64 image string from the hidden DOM input
+            base64_string = document.getElementById('base64-image-data').value
+            image_data = base64.b64decode(base64_string)
+            
+            # 2. Load image into Pillow
+            img = Image.open(io.BytesIO(image_data)).convert('RGB')
+            
+            # 3. Crop to the central 20% (matching the CSS targeting box)
+            width, height = img.size
+            left, top = width * 0.4, height * 0.4
+            right, bottom = width * 0.6, height * 0.6
+            cropped_img = img.crop((left, top, right, bottom))
+            
+            # 4. Extract Average Color (HSV)
+            pixels = list(cropped_img.getdata())
+            avg_r = sum(p[0] for p in pixels) / len(pixels)
+            avg_g = sum(p[1] for p in pixels) / len(pixels)
+            avg_b = sum(p[2] for p in pixels) / len(pixels)
+            
+            h, s, v = colorsys.rgb_to_hsv(avg_r / 255.0, avg_g / 255.0, avg_b / 255.0)
+            hue_degrees = h * 360
+            
+            # 5. UNDERSTAND Phase: Categorize Stress Level
+            if 45 <= hue_degrees <= 90:
+                status = "Low Stress"
+                bg_color = "bg-green-100 text-green-800"
+            elif 20 <= hue_degrees < 45:
+                status = "Moderate Stress"
+                bg_color = "bg-yellow-100 text-yellow-800"
+            else:
+                status = "High Stress"
+                bg_color = "bg-red-100 text-red-800"
+                
+            # 6. RESPOND Phase: Actionable Steps
+            if status == "Low Stress":
+                action = "You are well balanced. Maintain your current routine and hydration levels."
+            elif status == "Moderate Stress":
+                action = "Take a 5-minute break. Step away from your screen and perform light stretching."
+            else:
+                action = "Elevated cortisol detected. Initiate a 4-7-8 deep breathing protocol immediately."
+
+            # 7. Update UI
+            document.getElementById('ui-results').classList.remove('hidden')
+            
+            status_div = document.getElementById('result-status')
+            status_div.innerText = status
+            status_div.className = f"text-lg font-semibold py-2 px-4 rounded-md mb-2 {bg_color}"
+            
+            document.getElementById('result-details').innerText = f"Color Data: Hue {round(hue_degrees, 1)}°"
+            document.getElementById('result-action').innerText = action
+    </py-script>
+
+</body>
+</html>
