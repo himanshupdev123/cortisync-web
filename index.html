@@ -91,19 +91,26 @@
         const video = document.getElementById('camera-stream');
         const canvas = document.getElementById('capture-canvas');
         const context = canvas.getContext('2d');
+        const captureBtn = document.getElementById('capture-btn');
+        const uploadBtn = document.getElementById('upload-btn');
+
+        // Disable buttons until Python is ready
+        captureBtn.disabled = true;
+        uploadBtn.disabled = true;
+        captureBtn.innerText = "Loading AI Core...";
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => { video.srcObject = stream; })
         .catch(err => { console.warn("Camera unavailable.", err); });
 
-        document.getElementById('capture-btn').addEventListener('click', () => {
+        captureBtn.addEventListener('click', () => {
             if (!video.srcObject) return alert("Camera not active. Use Upload.");
             canvas.width = video.videoWidth; canvas.height = video.videoHeight;
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             triggerAnalysis();
         });
 
-        document.getElementById('upload-btn').addEventListener('click', () => document.getElementById('file-upload').click());
+        uploadBtn.addEventListener('click', () => document.getElementById('file-upload').click());
 
         document.getElementById('file-upload').addEventListener('change', (e) => {
             const file = e.target.files[0];
@@ -129,7 +136,7 @@
             document.getElementById('ui-measure').classList.add('hidden');
             document.getElementById('ui-loading').classList.remove('hidden');
             
-            // Allow DOM to update before triggering Python
+            // Trigger Python securely
             setTimeout(() => { document.getElementById('trigger-python-btn').click(); }, 100);
         }
     </script>
@@ -140,13 +147,27 @@
         import io
         import colorsys
         from PIL import Image
-        from pyscript import document
+        from pyscript import document, window
+        from pyodide.ffi import create_proxy
+
+        def update_ui(status, bg_color, action, hue):
+            document.getElementById('ui-loading').classList.add('hidden')
+            document.getElementById('ui-results').classList.remove('hidden')
+            
+            status_div = document.getElementById('result-status')
+            status_div.innerText = status
+            status_div.className = f"text-lg font-semibold py-2 px-4 rounded-md mb-2 {bg_color}"
+            
+            if hue >= 0:
+                document.getElementById('result-details').innerText = f"Color Data: Hue {round(hue, 1)}°"
+            else:
+                document.getElementById('result-details').innerText = "Unable to process image data."
+                
+            document.getElementById('result-action').innerText = action
 
         def process_strip(event):
             try:
                 base64_string = document.getElementById('base64-image-data').value
-                
-                # Fix Base64 padding if necessary (common JS to Python bug)
                 base64_string += "=" * ((4 - len(base64_string) % 4) % 4)
                 
                 image_data = base64.b64decode(base64_string)
@@ -178,23 +199,17 @@
                 update_ui(status, bg_color, action, hue_degrees)
                 
             except Exception as e:
-                # If anything crashes, show the exact error in the UI instead of a blank screen
-                update_ui("Analysis Error", "bg-red-200 text-red-900", f"System diagnostic: {str(e)}", 0)
+                update_ui("Analysis Error", "bg-red-200 text-red-900", f"System diagnostic: {str(e)}", -1)
 
-        def update_ui(status, bg_color, action, hue):
-            document.getElementById('ui-loading').classList.add('hidden')
-            document.getElementById('ui-results').classList.remove('hidden')
-            
-            status_div = document.getElementById('result-status')
-            status_div.innerText = status
-            status_div.className = f"text-lg font-semibold py-2 px-4 rounded-md mb-2 {bg_color}"
-            
-            if hue > 0:
-                document.getElementById('result-details').innerText = f"Color Data: Hue {round(hue, 1)}°"
-            else:
-                document.getElementById('result-details').innerText = "Unable to process image data."
-                
-            document.getElementById('result-action').innerText = action
+        # 1. Bind the event explicitly to ensure programmatic JS clicks are caught
+        proxy_process = create_proxy(process_strip)
+        document.getElementById("trigger-python-btn").addEventListener("click", proxy_process)
+
+        # 2. Enable UI buttons only after Python and Pillow have finished loading
+        capture_btn = document.getElementById('capture-btn')
+        capture_btn.disabled = False
+        capture_btn.innerText = "Capture via Camera"
+        document.getElementById('upload-btn').disabled = False
     </py-script>
 
 </body>
