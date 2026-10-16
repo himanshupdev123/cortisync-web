@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,17 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CORTISYNC - Stress Tracker</title>
     
-    <!-- PyScript Requirements -->
+    <!-- Modern PyScript Requirements -->
     <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
-    <script defer src="https://pyscript.net/latest/pyscript.js"></script>
+    <script type="module" src="https://pyscript.net/latest/core.js"></script>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- NO py-config NEEDED! We removed Pillow -->
-
     <style>
-        py-script { display: none; }
         .camera-container {
             position: relative; width: 100%; max-width: 400px; height: 300px;
             background: #000; overflow: hidden; margin: 0 auto; border-radius: 0.5rem;
@@ -37,7 +35,7 @@
 
     <div class="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6 text-center">
         <h1 class="text-2xl font-bold text-emerald-600 mb-2">CORTISYNC</h1>
-         <img
+                <img
   src="https://raw.githubusercontent.com/himanshupdev123/cortisync-web/main/WhatsApp%20Image%202026-10-16%20at%201.08.28%20AM.jpeg"
   alt="CortiSync"
   style="max-width: 100%; height: auto;"
@@ -65,10 +63,12 @@
             <p class="text-gray-600 font-semibold text-sm animate-pulse">Running AI Analysis...</p>
         </div>
 
-        <!-- Hidden Data Transfer (Now passes RGB instead of Base64) -->
+        <!-- Hidden Data Transfer -->
         <canvas id="capture-canvas" style="display: none;"></canvas>
         <input type="hidden" id="rgb-data">
-        <button id="trigger-python-btn" style="display: none;"></button>
+        
+        <!-- Modern py-click binding -->
+        <button id="trigger-python-btn" py-click="process_strip" style="display: none;"></button>
 
         <!-- RESULTS Phase -->
         <div id="ui-results" class="hidden mt-6">
@@ -90,7 +90,6 @@
         const canvas = document.getElementById('capture-canvas');
         const context = canvas.getContext('2d', { willReadFrequently: true });
         
-        // Buttons start ready because Python no longer needs to download Pillow
         const captureBtn = document.getElementById('capture-btn');
         const uploadBtn = document.getElementById('upload-btn');
 
@@ -124,13 +123,11 @@
         });
 
         function extractColorAndTrigger() {
-            // 1. Calculate the 20% center square
             const boxWidth = canvas.width * 0.2;
             const boxHeight = canvas.height * 0.2;
             const startX = (canvas.width - boxWidth) / 2;
             const startY = (canvas.height - boxHeight) / 2;
 
-            // 2. Extract pixels directly using browser native API
             const imageData = context.getImageData(startX, startY, boxWidth, boxHeight);
             const data = imageData.data;
             
@@ -138,30 +135,29 @@
             const pixelCount = data.length / 4;
 
             for (let i = 0; i < data.length; i += 4) {
-                r += data[i];     // Red
-                g += data[i + 1]; // Green
-                b += data[i + 2]; // Blue
+                r += data[i];
+                g += data[i + 1];
+                b += data[i + 2];
             }
 
             const avgR = r / pixelCount;
             const avgG = g / pixelCount;
             const avgB = b / pixelCount;
 
-            // 3. Pass only the 3 numbers to Python
             document.getElementById('rgb-data').value = `${avgR},${avgG},${avgB}`;
             
             document.getElementById('ui-measure').classList.add('hidden');
             document.getElementById('ui-loading').classList.remove('hidden');
             
-            setTimeout(() => { document.getElementById('trigger-python-btn').click(); }, 100);
+            // Trigger Python click
+            setTimeout(() => { document.getElementById('trigger-python-btn').click(); }, 150);
         }
     </script>
 
-    <!-- Python Logic: Only handles AI analysis, no image processing needed -->
-    <py-script style="display: none;">
+    <!-- Modern Python Logic Tag -->
+    <script type="py">
         import colorsys
         from pyscript import document
-        from pyodide.ffi import create_proxy
 
         def update_ui(status, bg_color, action, hue):
             document.getElementById('ui-loading').classList.add('hidden')
@@ -180,7 +176,6 @@
 
         def process_strip(event):
             try:
-                # Retrieve the RGB string passed from JavaScript
                 rgb_string = document.getElementById('rgb-data').value
                 r_str, g_str, b_str = rgb_string.split(',')
                 
@@ -188,30 +183,26 @@
                 avg_g = float(g_str)
                 avg_b = float(b_str)
                 
-                # Convert RGB to HSV for AI analysis
                 h, s, v = colorsys.rgb_to_hsv(avg_r / 255.0, avg_g / 255.0, avg_b / 255.0)
                 hue_degrees = h * 360
                 
-                # CORTISYNC Logic
                 if 45 <= hue_degrees <= 90:
-                    status, bg_color = "Low Stress", "bg-green-100 text-green-800"
+                    status = "Low Stress"
+                    bg_color = "bg-green-100 text-green-800"
                     action = "You are well balanced. Maintain your current routine and hydration levels."
                 elif 20 <= hue_degrees < 45:
-                    status, bg_color = "Moderate Stress", "bg-yellow-100 text-yellow-800"
+                    status = "Moderate Stress"
+                    bg_color = "bg-yellow-100 text-yellow-800"
                     action = "Take a 5-minute break. Step away from your screen and perform light stretching."
                 else:
-                    status, bg_color = "High Stress", "bg-red-100 text-red-800"
+                    status = "High Stress"
+                    bg_color = "bg-red-100 text-red-800"
                     action = "Elevated cortisol detected. Initiate a 4-7-8 deep breathing protocol immediately."
 
                 update_ui(status, bg_color, action, hue_degrees)
                 
             except Exception as e:
                 update_ui("Analysis Error", "bg-red-200 text-red-900", f"System diagnostic: {str(e)}", -1)
-
-        # Bind the Python function to the hidden trigger button
-        proxy_process = create_proxy(process_strip)
-        document.getElementById("trigger-python-btn").addEventListener("click", proxy_process)
-    </py-script>
-
+    </script>
 </body>
 </html>
