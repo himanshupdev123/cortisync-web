@@ -9,84 +9,66 @@
     <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
     <script defer src="https://pyscript.net/latest/pyscript.js"></script>
     
-    <!-- Tailwind CSS for rapid styling -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- PyScript Configuration (Hidden to prevent text leak) -->
+    <!-- PyScript Configuration -->
     <py-config style="display: none;">
         packages = ["Pillow"]
     </py-config>
 
     <style>
-        /* Hide py-script tags before PyScript fully loads */
-        py-script {
-            display: none;
-        }
+        py-script { display: none; }
         .camera-container {
-            position: relative;
-            width: 100%;
-            max-width: 400px;
-            height: 300px;
-            background: #000;
-            overflow: hidden;
-            margin: 0 auto;
-            border-radius: 0.5rem;
+            position: relative; width: 100%; max-width: 400px; height: 300px;
+            background: #000; overflow: hidden; margin: 0 auto; border-radius: 0.5rem;
         }
-        #camera-stream {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
+        #camera-stream { width: 100%; height: 100%; object-fit: cover; }
         .targeting-box {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 100px;
-            height: 100px;
-            border: 3px solid #10B981;
-            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
-            pointer-events: none;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 100px; height: 100px; border: 3px solid #10B981;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); pointer-events: none;
         }
+        .loader {
+            border: 4px solid #f3f3f3; border-top: 4px solid #10B981;
+            border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans p-4">
 
     <div class="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6 text-center">
         <h1 class="text-2xl font-bold text-emerald-600 mb-2">CORTISYNC</h1>
-        
-<img
-  src="https://raw.githubusercontent.com/himanshupdev123/cortisync-web/main/WhatsApp%20Image%202026-10-16%20at%201.08.28%20AM.jpeg"
-  alt="CortiSync"
-  style="max-width: 100%; height: auto;"
->
-
         <p class="text-sm text-gray-500 mb-6">Align the saliva strip within the green box, or upload a photo.</p>
 
-        <!-- MEASURE Phase: Camera & Upload UI -->
+        <!-- MEASURE Phase -->
         <div id="ui-measure">
             <div class="camera-container mb-4">
                 <video id="camera-stream" autoplay playsinline></video>
                 <div class="targeting-box"></div>
             </div>
-            
             <button id="capture-btn" class="bg-emerald-500 text-white font-bold py-2 px-6 rounded-full hover:bg-emerald-600 w-full transition mb-3">
                 Capture via Camera
             </button>
-            
             <button id="upload-btn" class="bg-gray-200 text-gray-700 font-bold py-2 px-6 rounded-full hover:bg-gray-300 w-full transition">
                 Upload from Gallery
             </button>
-            <!-- Hidden file input for gallery upload -->
             <input type="file" id="file-upload" accept="image/*" class="hidden">
         </div>
 
-        <!-- Hidden elements for JS to Python data transfer -->
+        <!-- LOADING State -->
+        <div id="ui-loading" class="hidden py-10">
+            <div class="loader mb-4"></div>
+            <p class="text-gray-600 font-semibold text-sm animate-pulse">Running AI Analysis...</p>
+        </div>
+
+        <!-- Hidden Data Transfer -->
         <canvas id="capture-canvas" style="display: none;"></canvas>
         <input type="hidden" id="base64-image-data">
         <button id="trigger-python-btn" py-click="process_strip" style="display: none;"></button>
 
-        <!-- UNDERSTAND & RESPOND Phase: Results UI -->
+        <!-- RESULTS Phase -->
         <div id="ui-results" class="hidden mt-6">
             <h2 class="text-xl font-bold mb-2">Analysis Complete</h2>
             <div id="result-status" class="text-lg font-semibold py-2 px-4 rounded-md mb-2"></div>
@@ -96,81 +78,59 @@
                 <h3 class="font-bold text-sm text-gray-500 uppercase tracking-wider mb-1">Action Plan</h3>
                 <p id="result-action" class="text-gray-800"></p>
             </div>
-            
             <button onclick="location.reload()" class="mt-6 text-emerald-600 underline text-sm">Scan another strip</button>
         </div>
     </div>
 
-    <!-- JavaScript: Camera & Upload Logic -->
+    <!-- JavaScript -->
     <script>
         const video = document.getElementById('camera-stream');
         const canvas = document.getElementById('capture-canvas');
-        const captureBtn = document.getElementById('capture-btn');
-        const uploadBtn = document.getElementById('upload-btn');
-        const fileUpload = document.getElementById('file-upload');
-        const dataInput = document.getElementById('base64-image-data');
-        const pythonBtn = document.getElementById('trigger-python-btn');
         const context = canvas.getContext('2d');
 
-        // 1. Request rear camera access
-        navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment" } 
-        })
-        .then(stream => {
-            video.srcObject = stream;
-        })
-        .catch(err => {
-            console.warn("Camera access denied or unavailable. Please use the upload option.", err);
-        });
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+        .then(stream => { video.srcObject = stream; })
+        .catch(err => { console.warn("Camera unavailable.", err); });
 
-        // 2. Capture frame from live camera
-        captureBtn.addEventListener('click', () => {
-            if (!video.srcObject) {
-                alert("Camera not active. Please use the Upload from Gallery option.");
-                return;
-            }
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+        document.getElementById('capture-btn').addEventListener('click', () => {
+            if (!video.srcObject) return alert("Camera not active. Use Upload.");
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            triggerPythonAnalysis();
+            triggerAnalysis();
         });
 
-        // 3. Trigger File Upload Dialog
-        uploadBtn.addEventListener('click', () => {
-            fileUpload.click();
-        });
+        document.getElementById('upload-btn').addEventListener('click', () => document.getElementById('file-upload').click());
 
-        // 4. Handle Uploaded Image
-        fileUpload.addEventListener('change', (e) => {
+        document.getElementById('file-upload').addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
-
             const reader = new FileReader();
             reader.onload = (event) => {
                 const img = new Image();
                 img.onload = () => {
-                    canvas.width = img.width;
-                    canvas.height = img.height;
+                    canvas.width = img.width; canvas.height = img.height;
                     context.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    triggerPythonAnalysis();
+                    triggerAnalysis();
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         });
 
-        // 5. Shared function to extract Base64 and run Python
-        function triggerPythonAnalysis() {
-            const imageDataUrl = canvas.toDataURL('image/jpeg');
-            const base64Data = imageDataUrl.split(',')[1]; // Remove header
+        function triggerAnalysis() {
+            const base64Data = canvas.toDataURL('image/jpeg').split(',')[1];
+            document.getElementById('base64-image-data').value = base64Data;
             
-            dataInput.value = base64Data;
+            // Switch UI to loading
             document.getElementById('ui-measure').classList.add('hidden');
-            pythonBtn.click(); 
+            document.getElementById('ui-loading').classList.remove('hidden');
+            
+            // Allow DOM to update before triggering Python
+            setTimeout(() => { document.getElementById('trigger-python-btn').click(); }, 100);
         }
     </script>
 
-    <!-- Python: AI Color Extraction & Logic -->
+    <!-- Python Logic -->
     <py-script style="display: none;">
         import base64
         import io
@@ -179,55 +139,57 @@
         from pyscript import document
 
         def process_strip(event):
-            # Retrieve the base64 image string from the hidden DOM input
-            base64_string = document.getElementById('base64-image-data').value
-            image_data = base64.b64decode(base64_string)
-            
-            # Load image into Pillow
-            img = Image.open(io.BytesIO(image_data)).convert('RGB')
-            
-            # Crop to the central 20% (simulating the targeting box area)
-            width, height = img.size
-            left, top = width * 0.4, height * 0.4
-            right, bottom = width * 0.6, height * 0.6
-            cropped_img = img.crop((left, top, right, bottom))
-            
-            # Extract Average Color (HSV)
-            pixels = list(cropped_img.getdata())
-            avg_r = sum(p[0] for p in pixels) / len(pixels)
-            avg_g = sum(p[1] for p in pixels) / len(pixels)
-            avg_b = sum(p[2] for p in pixels) / len(pixels)
-            
-            h, s, v = colorsys.rgb_to_hsv(avg_r / 255.0, avg_g / 255.0, avg_b / 255.0)
-            hue_degrees = h * 360
-            
-            # UNDERSTAND Phase: Categorize Stress Level
-            if 45 <= hue_degrees <= 90:
-                status = "Low Stress"
-                bg_color = "bg-green-100 text-green-800"
-            elif 20 <= hue_degrees < 45:
-                status = "Moderate Stress"
-                bg_color = "bg-yellow-100 text-yellow-800"
-            else:
-                status = "High Stress"
-                bg_color = "bg-red-100 text-red-800"
+            try:
+                base64_string = document.getElementById('base64-image-data').value
                 
-            # RESPOND Phase: Actionable Steps
-            if status == "Low Stress":
-                action = "You are well balanced. Maintain your current routine and hydration levels."
-            elif status == "Moderate Stress":
-                action = "Take a 5-minute break. Step away from your screen and perform light stretching."
-            else:
-                action = "Elevated cortisol detected. Initiate a 4-7-8 deep breathing protocol immediately."
+                # Fix Base64 padding if necessary (common JS to Python bug)
+                base64_string += "=" * ((4 - len(base64_string) % 4) % 4)
+                
+                image_data = base64.b64decode(base64_string)
+                img = Image.open(io.BytesIO(image_data)).convert('RGB')
+                
+                width, height = img.size
+                left, top = width * 0.4, height * 0.4
+                right, bottom = width * 0.6, height * 0.6
+                cropped_img = img.crop((left, top, right, bottom))
+                
+                pixels = list(cropped_img.getdata())
+                avg_r = sum(p[0] for p in pixels) / len(pixels)
+                avg_g = sum(p[1] for p in pixels) / len(pixels)
+                avg_b = sum(p[2] for p in pixels) / len(pixels)
+                
+                h, s, v = colorsys.rgb_to_hsv(avg_r / 255.0, avg_g / 255.0, avg_b / 255.0)
+                hue_degrees = h * 360
+                
+                if 45 <= hue_degrees <= 90:
+                    status, bg_color = "Low Stress", "bg-green-100 text-green-800"
+                    action = "You are well balanced. Maintain your current routine and hydration levels."
+                elif 20 <= hue_degrees < 45:
+                    status, bg_color = "Moderate Stress", "bg-yellow-100 text-yellow-800"
+                    action = "Take a 5-minute break. Step away from your screen and perform light stretching."
+                else:
+                    status, bg_color = "High Stress", "bg-red-100 text-red-800"
+                    action = "Elevated cortisol detected. Initiate a 4-7-8 deep breathing protocol immediately."
 
-            # Update UI
+                update_ui(status, bg_color, action, hue_degrees)
+                
+            except Exception as e:
+                # If anything crashes, show the exact error in the UI instead of a blank screen
+                update_ui("Analysis Error", "bg-red-200 text-red-900", f"System diagnostic: {str(e)}", 0)
+
+        def update_ui(status, bg_color, action, hue):
+            document.getElementById('ui-loading').classList.add('hidden')
             document.getElementById('ui-results').classList.remove('hidden')
             
             status_div = document.getElementById('result-status')
             status_div.innerText = status
             status_div.className = f"text-lg font-semibold py-2 px-4 rounded-md mb-2 {bg_color}"
             
-            document.getElementById('result-details').innerText = f"Color Data: Hue {round(hue_degrees, 1)}°"
+            if hue > 0:
+                document.getElementById('result-details').innerText = f"Color Data: Hue {round(hue, 1)}°"
+            else:
+                document.getElementById('result-details').innerText = "Unable to process image data."
+                
             document.getElementById('result-action').innerText = action
     </py-script>
 
