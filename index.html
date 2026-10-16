@@ -12,10 +12,7 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- PyScript Configuration -->
-    <py-config style="display: none;">
-        packages = ["Pillow"]
-    </py-config>
+    <!-- NO py-config NEEDED! We removed Pillow -->
 
     <style>
         py-script { display: none; }
@@ -39,7 +36,8 @@
 <body class="bg-gray-50 text-gray-800 font-sans p-4">
 
     <div class="max-w-md mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6 text-center">
-        <img
+        <h1 class="text-2xl font-bold text-emerald-600 mb-2">CORTISYNC</h1>
+         <img
   src="https://raw.githubusercontent.com/himanshupdev123/cortisync-web/main/WhatsApp%20Image%202026-10-16%20at%201.08.28%20AM.jpeg"
   alt="CortiSync"
   style="max-width: 100%; height: auto;"
@@ -67,10 +65,10 @@
             <p class="text-gray-600 font-semibold text-sm animate-pulse">Running AI Analysis...</p>
         </div>
 
-        <!-- Hidden Data Transfer -->
+        <!-- Hidden Data Transfer (Now passes RGB instead of Base64) -->
         <canvas id="capture-canvas" style="display: none;"></canvas>
-        <input type="hidden" id="base64-image-data">
-        <button id="trigger-python-btn" py-click="process_strip" style="display: none;"></button>
+        <input type="hidden" id="rgb-data">
+        <button id="trigger-python-btn" style="display: none;"></button>
 
         <!-- RESULTS Phase -->
         <div id="ui-results" class="hidden mt-6">
@@ -86,18 +84,15 @@
         </div>
     </div>
 
-    <!-- JavaScript -->
+    <!-- JavaScript: Extracts pixels instantly -->
     <script>
         const video = document.getElementById('camera-stream');
         const canvas = document.getElementById('capture-canvas');
-        const context = canvas.getContext('2d');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        
+        // Buttons start ready because Python no longer needs to download Pillow
         const captureBtn = document.getElementById('capture-btn');
         const uploadBtn = document.getElementById('upload-btn');
-
-        // Disable buttons until Python is ready
-        captureBtn.disabled = true;
-        uploadBtn.disabled = true;
-        captureBtn.innerText = "Loading AI Core...";
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => { video.srcObject = stream; })
@@ -107,7 +102,7 @@
             if (!video.srcObject) return alert("Camera not active. Use Upload.");
             canvas.width = video.videoWidth; canvas.height = video.videoHeight;
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            triggerAnalysis();
+            extractColorAndTrigger();
         });
 
         uploadBtn.addEventListener('click', () => document.getElementById('file-upload').click());
@@ -121,33 +116,51 @@
                 img.onload = () => {
                     canvas.width = img.width; canvas.height = img.height;
                     context.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    triggerAnalysis();
+                    extractColorAndTrigger();
                 };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         });
 
-        function triggerAnalysis() {
-            const base64Data = canvas.toDataURL('image/jpeg').split(',')[1];
-            document.getElementById('base64-image-data').value = base64Data;
+        function extractColorAndTrigger() {
+            // 1. Calculate the 20% center square
+            const boxWidth = canvas.width * 0.2;
+            const boxHeight = canvas.height * 0.2;
+            const startX = (canvas.width - boxWidth) / 2;
+            const startY = (canvas.height - boxHeight) / 2;
+
+            // 2. Extract pixels directly using browser native API
+            const imageData = context.getImageData(startX, startY, boxWidth, boxHeight);
+            const data = imageData.data;
             
-            // Switch UI to loading
+            let r = 0, g = 0, b = 0;
+            const pixelCount = data.length / 4;
+
+            for (let i = 0; i < data.length; i += 4) {
+                r += data[i];     // Red
+                g += data[i + 1]; // Green
+                b += data[i + 2]; // Blue
+            }
+
+            const avgR = r / pixelCount;
+            const avgG = g / pixelCount;
+            const avgB = b / pixelCount;
+
+            // 3. Pass only the 3 numbers to Python
+            document.getElementById('rgb-data').value = `${avgR},${avgG},${avgB}`;
+            
             document.getElementById('ui-measure').classList.add('hidden');
             document.getElementById('ui-loading').classList.remove('hidden');
             
-            // Trigger Python securely
             setTimeout(() => { document.getElementById('trigger-python-btn').click(); }, 100);
         }
     </script>
 
-    <!-- Python Logic -->
+    <!-- Python Logic: Only handles AI analysis, no image processing needed -->
     <py-script style="display: none;">
-        import base64
-        import io
         import colorsys
-        from PIL import Image
-        from pyscript import document, window
+        from pyscript import document
         from pyodide.ffi import create_proxy
 
         def update_ui(status, bg_color, action, hue):
@@ -167,25 +180,19 @@
 
         def process_strip(event):
             try:
-                base64_string = document.getElementById('base64-image-data').value
-                base64_string += "=" * ((4 - len(base64_string) % 4) % 4)
+                # Retrieve the RGB string passed from JavaScript
+                rgb_string = document.getElementById('rgb-data').value
+                r_str, g_str, b_str = rgb_string.split(',')
                 
-                image_data = base64.b64decode(base64_string)
-                img = Image.open(io.BytesIO(image_data)).convert('RGB')
+                avg_r = float(r_str)
+                avg_g = float(g_str)
+                avg_b = float(b_str)
                 
-                width, height = img.size
-                left, top = width * 0.4, height * 0.4
-                right, bottom = width * 0.6, height * 0.6
-                cropped_img = img.crop((left, top, right, bottom))
-                
-                pixels = list(cropped_img.getdata())
-                avg_r = sum(p[0] for p in pixels) / len(pixels)
-                avg_g = sum(p[1] for p in pixels) / len(pixels)
-                avg_b = sum(p[2] for p in pixels) / len(pixels)
-                
+                # Convert RGB to HSV for AI analysis
                 h, s, v = colorsys.rgb_to_hsv(avg_r / 255.0, avg_g / 255.0, avg_b / 255.0)
                 hue_degrees = h * 360
                 
+                # CORTISYNC Logic
                 if 45 <= hue_degrees <= 90:
                     status, bg_color = "Low Stress", "bg-green-100 text-green-800"
                     action = "You are well balanced. Maintain your current routine and hydration levels."
@@ -201,15 +208,9 @@
             except Exception as e:
                 update_ui("Analysis Error", "bg-red-200 text-red-900", f"System diagnostic: {str(e)}", -1)
 
-        # 1. Bind the event explicitly to ensure programmatic JS clicks are caught
+        # Bind the Python function to the hidden trigger button
         proxy_process = create_proxy(process_strip)
         document.getElementById("trigger-python-btn").addEventListener("click", proxy_process)
-
-        # 2. Enable UI buttons only after Python and Pillow have finished loading
-        capture_btn = document.getElementById('capture-btn')
-        capture_btn.disabled = False
-        capture_btn.innerText = "Capture via Camera"
-        document.getElementById('upload-btn').disabled = False
     </py-script>
 
 </body>
