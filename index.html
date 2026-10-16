@@ -7,8 +7,8 @@
     <title>CORTISYNC - Stress Tracker</title>
     
     <!-- Modern PyScript Requirements -->
-    <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
-    <script type="module" src="https://pyscript.net/latest/core.js"></script>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -155,11 +155,12 @@
     </script>
 
     <!-- Modern Python Logic Tag -->
+    <!-- Modern Python Logic Tag -->
     <script type="py">
         import colorsys
         from pyscript import document
 
-        def update_ui(status, bg_color, action, hue):
+        def update_ui(status, bg_color, action, intensity):
             document.getElementById('ui-loading').classList.add('hidden')
             document.getElementById('ui-results').classList.remove('hidden')
             
@@ -167,8 +168,8 @@
             status_div.innerText = status
             status_div.className = f"text-lg font-semibold py-2 px-4 rounded-md mb-2 {bg_color}"
             
-            if hue >= 0:
-                document.getElementById('result-details').innerText = f"Color Data: Hue {round(hue, 1)}°"
+            if intensity >= 0:
+                document.getElementById('result-details').innerText = f"Color Data: Saturation {round(intensity, 1)}%"
             else:
                 document.getElementById('result-details').innerText = "Unable to process image data."
                 
@@ -183,23 +184,27 @@
                 avg_g = float(g_str)
                 avg_b = float(b_str)
                 
+                # Convert RGB to HSV 
                 h, s, v = colorsys.rgb_to_hsv(avg_r / 255.0, avg_g / 255.0, avg_b / 255.0)
-                hue_degrees = h * 360
                 
-                if 45 <= hue_degrees <= 90:
-                    status = "Low Stress"
+                # Convert Saturation to a 0-100% scale for easy thresholding
+                saturation_percent = s * 100
+                
+                # Evaluate based on color intensity (Light, Medium, Dark)
+                if saturation_percent < 30:
+                    status = "Low Cortisol"
                     bg_color = "bg-green-100 text-green-800"
-                    action = "You are well balanced. Maintain your current routine and hydration levels."
-                elif 20 <= hue_degrees < 45:
-                    status = "Moderate Stress"
+                    action = "Within expected range. Maintain your current routine."
+                elif 30 <= saturation_percent < 60:
+                    status = "Moderate Cortisol"
                     bg_color = "bg-yellow-100 text-yellow-800"
-                    action = "Take a 5-minute break. Step away from your screen and perform light stretching."
+                    action = "Elevated levels detected. Monitor and consider a short break."
                 else:
-                    status = "High Stress"
+                    status = "High Cortisol"
                     bg_color = "bg-red-100 text-red-800"
-                    action = "Elevated cortisol detected. Initiate a 4-7-8 deep breathing protocol immediately."
+                    action = "Abnormal levels. Clinical evaluation recommended. Initiate a 4-7-8 deep breathing protocol."
 
-                update_ui(status, bg_color, action, hue_degrees)
+                update_ui(status, bg_color, action, saturation_percent)
                 
             except Exception as e:
                 update_ui("Analysis Error", "bg-red-200 text-red-900", f"System diagnostic: {str(e)}", -1)
